@@ -65,11 +65,7 @@ async def queue_job(job_id):
 
 
 def _record_sent(row, receipt):
-    # The receipt and tracker transition commit together, including after crash reconciliation.
-    stamp = db.now()
-    with db.connection() as conn:
-        conn.execute("UPDATE mail_applications SET status='sent',sent_at=?,gmail_id=?,thread_id=?,last_error='',updated=? WHERE id=?", (row.get("sent_at") or stamp, receipt["id"], receipt["threadId"], stamp, row["id"]))
-        conn.execute("UPDATE jobs SET status='applied',updated=? WHERE id=? AND status IN ('discovered','shortlisted','drafted')", (stamp, row["job_id"]))
+    maildb.record_sent(row, receipt)
     db.event("mail", f"Gmail accepted the application email to {row['recipient']}.")
 
 
@@ -80,8 +76,7 @@ async def send_queued():
     await gmail.access_token()
     settings = maildb.settings()
     sent = 0
-    with db.connection() as conn:
-        rows = [dict(r) for r in conn.execute("SELECT * FROM mail_applications WHERE status='queued' ORDER BY id")]
+    rows = maildb.queued()
     for row in rows:
         if row["sender"].lower() != status["email"].lower():
             maildb.update(row["id"], status="needs_update", last_error="The connected sender differs from the queued sender.")
@@ -125,8 +120,7 @@ async def send_queued():
 
 async def reconcile():
     cutoff = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
-    with db.connection() as conn:
-        rows = [dict(r) for r in conn.execute("SELECT * FROM mail_applications WHERE status='delivery_unknown' OR (status='sending' AND updated<?)", (cutoff,))]
+    rows = maildb.unconfirmed(cutoff)
     reconciled = 0
     for row in rows:
         if not row["message_id"]:
@@ -155,8 +149,7 @@ async def sync_replies():
     if not status["connected"]:
         raise gmail.GmailError("Connect Gmail before checking replies.")
     await reconcile()
-    with db.connection() as conn:
-        rows = [dict(r) for r in conn.execute("SELECT * FROM mail_applications WHERE thread_id IS NOT NULL AND status IN ('sent','replied','automatic_reply','bounced') AND sender=?", (status["email"].lower(),))]
+    rows = maildb.reply_targets(status["email"].lower())
     count = 0
     for row in rows:
         try:
@@ -183,11 +176,8 @@ async def sync_replies():
                 continue
             if sender != row["recipient"].lower() and row["message_id"] not in refs and kind != "bounce":
                 continue
-            with db.connection() as conn:
-                existing = conn.execute("SELECT 1 FROM mail_events WHERE message_id=?", (message["id"],)).fetchone()
-                if existing:
-                    continue
-                conn.execute("INSERT INTO mail_events VALUES(?,?,?,?,?,?)", (message["id"], row["id"], received, sender, headers.get("subject", "")[:500], kind))
+            if not maildb.record_event(message["id"], row["id"], received, sender, headers.get("subject", "")[:500], kind):
+                continue
             # Later automatic acknowledgements must not overwrite an already recorded reply.
             if kind == "reply" or not row["reply_at"]:
                 maildb.update(row["id"], status={"reply": "replied", "bounce": "bounced", "automatic_reply": "automatic_reply"}[kind], reply_at=received if kind == "reply" else row["reply_at"], reply_from=sender, reply_subject=headers.get("subject", "")[:500], response_kind=kind)
@@ -221,8 +211,7 @@ async def run_cycle(force=False, replies_only=False):
     summary = {"sent": 0, "responses": 0, "queued": 0, "needs_manual": 0}
     try:
         if not replies_only:
-            with db.connection() as conn:
-                run_id = conn.execute("INSERT INTO worker_runs(started) VALUES(?)", (db.now(),)).lastrowid
+            run_id = maildb.start_run()
         summary["responses"] = await sync_replies()
         settings = maildb.settings()
         if settings["enabled"] and not replies_only:
@@ -246,13 +235,11 @@ async def run_cycle(force=False, replies_only=False):
                     summary["needs_manual"] += 1
             summary["sent"] += await send_queued()
         if run_id:
-            with db.connection() as conn:
-                conn.execute("UPDATE worker_runs SET finished=?,outcome='ok',summary=? WHERE id=?", (db.now(), json.dumps(summary), run_id))
+            maildb.finish_run(run_id, "ok", json.dumps(summary))
         return {"outcome": "ok", **summary}
     except (gmail.GmailError, providers.ProviderError, ValueError) as exc:
         if run_id:
-            with db.connection() as conn:
-                conn.execute("UPDATE worker_runs SET finished=?,outcome='error',summary=? WHERE id=?", (db.now(), str(exc), run_id))
+            maildb.finish_run(run_id, "error", str(exc))
         db.event("mail", "Automatic email run paused: " + str(exc))
         raise
     finally:

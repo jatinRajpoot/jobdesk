@@ -2,6 +2,8 @@
 
 A personal job-search workspace for Bharti Singh with Parallel Search/Extract, River AI's DeepSeek V4.1 Flash 1017 using low reasoning, and Gmail OAuth. Runs locally with a FastAPI backend, a responsive browser interface and SQLite storage.
 
+Cloud deployment: **https://jobdesk-eluyfppkua-el.a.run.app**. Sign in using Bharti's configured Google account. The cloud version uses persistent Firestore storage, encrypted tokens, Secret Manager and a daily Cloud Run worker. See [DEPLOYMENT.md](DEPLOYMENT.md) for configuration and redeployment commands.
+
 ## Run locally on Windows
 
 ```powershell
@@ -99,14 +101,10 @@ For a paid end-to-end integration test using a clearly labelled synthetic candid
 
 This searches real roles, checks evidence, generates a packet and exports documents. It never sends email or submits an application. Results are saved under the ignored `data/qa` folder, without changing your main workspace.
 
-## Before Cloud Run deployment
+## Cloud Run deployment
 
-The Dockerfile is a starting point, not a completed cloud deployment. Before publishing this personal-data app:
+The service is deployed in `asia-south1` using the existing `bharti` project. Personal pages and APIs require a session issued after Google's verified Gmail identity check. Firestore stores durable data and shared queue locks; Secret Manager supplies provider keys and the encryption key. Email work runs in a separate Cloud Run job, scheduled for 09:00 Asia/Kolkata, with the web service scaling to zero when idle.
 
-- Add authentication and per-user data access controls (or restrict access with Cloud Run IAM).
-- Replace local SQLite with durable managed storage; Cloud Run's writable filesystem is ephemeral and is not a database backup.
-- Move credentials to Secret Manager/environment configuration; Windows DPAPI cannot be decrypted on Cloud Run.
-- Configure the public hostname in TrustedHostMiddleware and confirm origin protection through the deployment proxy.
-- Move long-running research to durable queued workers. Replace the local Windows daily task with Cloud Scheduler, and Windows DPAPI token encryption with managed encryption before deployment.
+The local profile has been transferred and the local Windows automatic-send task disabled to avoid parallel local and cloud runs. The local SQLite database is retained. The cloud dashboard must be used for future edits; later cloud edits are not automatically copied back to SQLite. Google OAuth includes the cloud callback and still requires Bharti's own consent.
 
-The Gmail API and OAuth client are configured in the existing project. This local setup does not deploy Cloud Run resources.
+Use the cloud scripts and verification instructions in [DEPLOYMENT.md](DEPLOYMENT.md) for future deployments. API credentials, downloaded OAuth JSON, encryption keys, data snapshots and provider tokens are excluded from source uploads and Git.

@@ -16,8 +16,7 @@ class ProviderError(Exception):
 
 
 def check_budget(provider):
-    with db.connection() as conn:
-        n = conn.execute("SELECT COUNT(*) FROM usage WHERE provider=? AND time>=?", (provider, db.now()[:10])).fetchone()[0]
+    n = db.usage_count(provider, db.now()[:10])
     if n >= LIMITS[provider]:
         raise ProviderError(f"Today's local {provider.title()} request limit has been reached. Try again tomorrow.")
 
@@ -72,8 +71,7 @@ async def llm(system, payload, operation, max_tokens=6000, json_output=True):
             raise ProviderError("DeepSeek did not finish its response. Try again with a shorter resume or job description.")
         content = choices[0].get("message", {}).get("content", "")
         usage = response.get("usage", {})
-        with db.connection() as conn:
-            conn.execute("UPDATE usage SET input_tokens=?, output_tokens=? WHERE id=?", (usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0), attempt_id))
+        db.update_usage(attempt_id, usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0))
         if not json_output:
             return content
         try:

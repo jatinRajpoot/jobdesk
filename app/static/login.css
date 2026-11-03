@@ -1,0 +1,1 @@
+.login{max-width:520px;margin:12vh auto;padding:40px;background:#fff;border:1px solid var(--line);border-radius:14px}.login h1{font-size:36px}.login p{color:#7b8576;font-size:13px}.login .button{margin:15px 0 22px}.login .profile-note{font-size:11px}.login .light-link{font-size:11px}@media(max-width:600px){.login{margin:40px 20px;padding:28px}.login h1{font-size:30px}}

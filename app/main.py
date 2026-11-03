@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 from contextlib import asynccontextmanager
 from io import BytesIO
 from pathlib import Path
@@ -13,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from . import automation, config, db, gmail, maildb, providers, workflows
+from . import access, automation, config, db, gmail, maildb, providers, workflows
 from .documents import docx_resume, pdf_resume
 
 
@@ -46,7 +47,13 @@ logging.getLogger("uvicorn.access").addFilter(OAuthAccessLogFilter())
 
 
 app = FastAPI(title="Jobdesk", docs_url="/api/docs", lifespan=lifespan)
-app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "[::1]", "testserver"])
+cloud_host = urlsplit(os.environ.get("PUBLIC_BASE_URL", "")).hostname
+allowed_hosts = ["localhost", "127.0.0.1", "[::1]", "testserver"]
+if cloud_host:
+    allowed_hosts.append(cloud_host)
+elif os.environ.get("K_SERVICE"):
+    allowed_hosts.append("*.run.app")
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
 STATIC = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 operation_locks = {}
@@ -55,6 +62,11 @@ search_lock = asyncio.Lock()
 
 @app.middleware("http")
 async def local_security(request: Request, call_next):
+    public = request.url.path in {"/login", "/privacy", "/api/health", "/auth/google/start", "/auth/google/callback"} or request.url.path.startswith("/static/")
+    if access.required() and not public and not access.authenticated(request.cookies.get(access.COOKIE, "")):
+        if request.url.path.startswith("/api/"):
+            return JSONResponse({"detail": "Sign in with Bharti's Google account to continue."}, status_code=401, headers={"Cache-Control": "no-store"})
+        return RedirectResponse("/login", status_code=303, headers={"Cache-Control": "no-store"})
     if request.method not in {"GET", "HEAD", "OPTIONS"}:
         origin = request.headers.get("origin")
         if origin and origin != f"{request.url.scheme}://{request.headers.get('host')}":
@@ -103,12 +115,31 @@ def required_job(jid):
 
 @app.get("/")
 async def index():
+    if os.environ.get("K_SERVICE"):
+        from fastapi.responses import HTMLResponse
+        html = (STATIC / "index.html").read_text(encoding="utf-8").replace("LOCAL PREVIEW", "PRIVATE CLOUD").replace("Personal · Local", "Personal · Cloud")
+        return HTMLResponse(html, headers={"Cache-Control": "no-store"})
     return FileResponse(STATIC / "index.html")
 
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "mode": "local"}
+    return {"status": "ok", "mode": "cloud" if os.environ.get("K_SERVICE") else "local"}
+
+
+@app.get("/login")
+async def login(request: Request):
+    if request.query_params.get("gmail") == "failed":
+        from fastapi.responses import HTMLResponse
+        html = (STATIC / "login.html").read_text(encoding="utf-8").replace('<a class="button primary"', '<p class="notice">The connection could not be completed. Use Bharti\'s configured Google account and grant both Gmail permissions, then try again.</p><a class="button primary"')
+        return HTMLResponse(html)
+    return FileResponse(STATIC / "login.html")
+
+
+@app.get("/privacy")
+async def privacy():
+    from fastapi.responses import HTMLResponse
+    return HTMLResponse('<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Privacy · Jobdesk</title><link rel="stylesheet" href="/static/style.css"><link rel="stylesheet" href="/static/login.css"></head><body><main class="login"><h1>Your data in Jobdesk</h1><p>Jobdesk is a private job-search workspace for Bharti. It stores her profile, job records and application history. Resume and job details are sent to River AI for writing and analysis; search requests and job links are sent to Parallel for research.</p><p>After permission is granted, Gmail access sends eligible application emails and reads tracked conversation metadata to detect replies and bounces. Inbox content is not sent to an AI provider. Gmail data is not sold or used for advertising or model training. The app does not delete or mark messages as read.</p><p>Cloud records are stored in the project\'s Firestore database. Gmail tokens are encrypted with a key held in Secret Manager. The private dashboard provides a workspace export and Gmail disconnection controls; Google account permissions can also be revoked from the Google account.</p><p>Google API data use follows the Google API Services User Data Policy, including Limited Use requirements.</p><a class="light-link" href="/">Return to Jobdesk</a></main></body></html>')
 
 
 def connection_status():
@@ -119,7 +150,7 @@ def connection_status():
 @app.get("/api/state")
 async def state():
     profile = db.profile()
-    return {"profile": profile, "profile_fingerprint": workflows.profile_fingerprint(profile), "jobs": db.jobs(), "connections": connection_status(), "mail": maildb.overview(), **db.overview()}
+    return {"profile": profile, "profile_fingerprint": workflows.profile_fingerprint(profile), "jobs": db.jobs(), "connections": connection_status(), "mail": maildb.overview(), "deployment": {"mode": "cloud" if os.environ.get("K_SERVICE") else "local"}, **db.overview()}
 
 
 class Profile(BaseModel):
@@ -347,11 +378,13 @@ async def google_callback(request: Request, state: str = "", code: str = "", err
         verifier = gmail.consume_state(state, request.cookies.get("jobdesk_oauth", ""))
         if error or not code:
             raise gmail.GmailError("Google authorization was cancelled. Start again from Connections.")
-        await gmail.finish_oauth(code, verifier)
+        email = await gmail.finish_oauth(code, verifier)
         response = RedirectResponse("/#connections?gmail=connected", status_code=303)
+        if access.required():
+            response.set_cookie(access.COOKIE, access.issue(email), max_age=7*86400, httponly=True, secure=True, samesite="lax", path="/")
     except gmail.GmailError as exc:
         maildb.save_settings({"oauth_error": str(exc)})
-        response = RedirectResponse("/#connections?gmail=failed", status_code=303)
+        response = RedirectResponse("/login?gmail=failed" if access.required() else "/#connections?gmail=failed", status_code=303)
     response.delete_cookie("jobdesk_oauth", path="/auth/google")
     return response
 
@@ -392,11 +425,17 @@ async def queue_email(jid: str):
 
 @app.post("/api/mail/check-replies")
 async def check_mail_replies():
+    if os.environ.get("CLOUD_RUN_WORKER"):
+        from .cloudjobs import launch
+        return await launch(replies_only=True)
     return await automation.run_cycle(force=True, replies_only=True)
 
 
 @app.post("/api/mail/run")
 async def run_mail_automation():
+    if os.environ.get("CLOUD_RUN_WORKER"):
+        from .cloudjobs import launch
+        return await launch()
     return await automation.run_cycle(force=True)
 
 
@@ -407,8 +446,15 @@ async def cancel_queued_mail(aid: int):
         raise HTTPException(404, "Application not found")
     if row["status"] not in {"queued", "needs_update", "failed"}:
         raise HTTPException(409, "Only an unsent queued application can be cancelled.")
-    with db.connection() as conn:
-        changed = conn.execute("UPDATE mail_applications SET status='cancelled',updated=? WHERE id=? AND status IN ('queued','needs_update','failed')", (db.now(), aid)).rowcount
+    changed = maildb.cancel(aid)
     if not changed:
         raise HTTPException(409, "This application is already being sent or was sent.")
     return {"cancelled": True}
+
+
+@app.post("/api/logout")
+async def logout(request: Request):
+    access.revoke(request.cookies.get(access.COOKIE, ""))
+    response = JSONResponse({"signed_out": True})
+    response.delete_cookie(access.COOKIE, path="/")
+    return response

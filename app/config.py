@@ -13,6 +13,11 @@ SECRET_LOCK = threading.RLock()
 
 
 def _crypt(data: bytes, decrypt=False) -> bytes:
+    cloud_key = os.environ.get("TOKEN_ENCRYPTION_KEY")
+    if cloud_key:
+        from cryptography.fernet import Fernet
+        cipher = Fernet(cloud_key.encode())
+        return cipher.decrypt(data) if decrypt else cipher.encrypt(data)
     if os.name != "nt":
         raise ValueError("Set credentials through environment variables on this operating system.")
     from ctypes import wintypes

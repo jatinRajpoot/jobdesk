@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 
 from .config import DATA
+from .storage import cloud, is_cloud
 
 
 def now():
@@ -14,6 +15,8 @@ def now():
 
 @contextmanager
 def connection():
+    if is_cloud():
+        raise RuntimeError("SQLite connections must not be used in the cloud backend.")
     path = os.environ.get("DATABASE_PATH", str(DATA / "jobdesk.sqlite3"))
     with sqlite3.connect(path, timeout=15) as db:
         db.row_factory = sqlite3.Row
@@ -21,6 +24,7 @@ def connection():
         yield db
 
 
+@cloud("db")
 def init():
     with connection() as db:
         db.executescript("""
@@ -37,21 +41,25 @@ def init():
         db.execute("INSERT OR IGNORE INTO profile VALUES(1, ?)", (json.dumps({"name": "", "email": "", "headline": "", "location": "", "target_roles": "", "target_locations": "", "resume": "", "preferences": ""}),))
 
 
+@cloud("db")
 def profile():
     with connection() as db:
         return json.loads(db.execute("SELECT body FROM profile WHERE id=1").fetchone()[0])
 
 
+@cloud("db")
 def save_profile(body):
     with connection() as db:
         db.execute("UPDATE profile SET body=? WHERE id=1", (json.dumps(body),))
 
 
+@cloud("db")
 def event(kind, message):
     with connection() as db:
         db.execute("INSERT INTO activity(time,kind,message) VALUES(?,?,?)", (now(), kind, message))
 
 
+@cloud("db")
 def usage(provider, operation, input_tokens=0, output_tokens=0):
     with connection() as db:
         cursor = db.execute("INSERT INTO usage(time,provider,operation,input_tokens,output_tokens) VALUES(?,?,?,?,?)", (now(), provider, operation, input_tokens, output_tokens))
@@ -68,16 +76,19 @@ def decode(row):
     return d
 
 
+@cloud("db")
 def jobs():
     with connection() as db:
         return [decode(r) for r in db.execute("SELECT * FROM jobs ORDER BY created DESC, rowid DESC")]
 
 
+@cloud("db")
 def job(job_id):
     with connection() as db:
         return decode(db.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone())
 
 
+@cloud("db")
 def upsert(body):
     jid = hashlib.sha256(body["url"].encode()).hexdigest()[:20]
     stamp = now()
@@ -91,6 +102,7 @@ def upsert(body):
     return job(jid), not bool(existing)
 
 
+@cloud("db")
 def update_job(jid, **values):
     allowed = {"status", "notes", "assessment", "assessment_at", "draft", "draft_at"}
     if not values or not values.keys() <= allowed:
@@ -101,8 +113,21 @@ def update_job(jid, **values):
         db.execute("UPDATE jobs SET " + ",".join(k + "=?" for k in encoded) + " WHERE id=?", (*encoded.values(), jid))
 
 
+@cloud("db")
 def overview():
     with connection() as db:
         activity = [dict(r) for r in db.execute("SELECT * FROM activity ORDER BY id DESC LIMIT 12")]
         usage = [dict(r) for r in db.execute("SELECT provider,operation,COUNT(*) calls,SUM(input_tokens) input_tokens,SUM(output_tokens) output_tokens FROM usage GROUP BY provider,operation")]
     return {"activity": activity, "usage": usage}
+
+
+@cloud("db")
+def usage_count(provider, since):
+    with connection() as conn:
+        return conn.execute("SELECT COUNT(*) FROM usage WHERE provider=? AND time>=?", (provider, since)).fetchone()[0]
+
+
+@cloud("db")
+def update_usage(attempt_id, input_tokens, output_tokens):
+    with connection() as conn:
+        conn.execute("UPDATE usage SET input_tokens=?,output_tokens=? WHERE id=?", (input_tokens, output_tokens, attempt_id))

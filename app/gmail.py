@@ -57,9 +57,7 @@ def begin_oauth():
     state, verifier, browser = secrets.token_urlsafe(32), secrets.token_urlsafe(64), secrets.token_urlsafe(32)
     digest = hashlib.sha256(state.encode()).hexdigest()
     browser_hash = hashlib.sha256(browser.encode()).hexdigest()
-    with db.connection() as conn:
-        conn.execute("DELETE FROM oauth_states WHERE created<?", ((datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat(),))
-        conn.execute("INSERT INTO oauth_states VALUES(?,?,?,?)", (digest, verifier, db.now(), browser_hash))
+    maildb.save_oauth_state(digest, verifier, browser_hash)
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
     query = {"client_id": client["client_id"], "redirect_uri": REDIRECT, "response_type": "code", "scope": " ".join(SCOPES), "state": state, "access_type": "offline", "prompt": "consent", "include_granted_scopes": "true", "login_hint": maildb.settings()["expected_email"], "code_challenge": challenge, "code_challenge_method": "S256"}
     return "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(query), browser
@@ -69,13 +67,11 @@ def consume_state(state, browser):
     if not state or not browser:
         raise GmailError("The Gmail connection expired or was not started in this browser. Start again from Connections.")
     digest = hashlib.sha256(state.encode()).hexdigest()
-    with db.connection() as conn:
-        conn.execute("BEGIN IMMEDIATE")
-        row = conn.execute("SELECT * FROM oauth_states WHERE hash=?", (digest,)).fetchone()
-        if not row or row["created"] < (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat() or not secrets.compare_digest(row["browser_hash"], hashlib.sha256(browser.encode()).hexdigest()):
-            raise GmailError("Invalid or expired OAuth state. Start again from Connections.")
-        conn.execute("DELETE FROM oauth_states WHERE hash=?", (digest,))
-    return row["verifier"]
+    try:
+        return maildb.consume_oauth_state(digest, hashlib.sha256(browser.encode()).hexdigest())
+    except ValueError:
+        raise GmailError("Invalid or expired OAuth state. Start again from Connections.") from None
+
 
 
 async def token_request(data):

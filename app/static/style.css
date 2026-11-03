@@ -3,3 +3,4 @@
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 .mail-settings{margin-bottom:25px}.table-scroll{overflow-x:auto;margin-bottom:20px}.mail-table{margin:0;min-width:650px}.mail-table td{vertical-align:top;line-height:1.8}.mail-table p{margin:7px 0;font-size:10px}.mail-table small{font-size:9px}.mail-error{color:#ad6a54!important}.badge.sent{background:#eef0f9;color:#7381ac}.badge.replied{background:#e8f4ec;color:#4d8c63}.badge.bounced,.badge.failed,.badge.delivery_unknown{background:#f9e9e4;color:#b37660}.badge.queued,.badge.sending{background:#faf0df;color:#a58a55}.badge.automatic_reply{background:#edf0f2;color:#808e96}
 .sidebar{overflow-y:auto}.sidebar-bottom{flex-shrink:0}@media(max-height:760px){.sidebar .quiet-card{display:none}.sidebar-bottom{padding-top:20px}}
+#cloud-signout[hidden]{display:none}
