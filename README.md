@@ -2,7 +2,7 @@
 
 A personal job-search workspace for Bharti Singh with Parallel Search/Extract, River AI's DeepSeek V4.1 Flash 1017 using low reasoning, and Gmail OAuth. Runs locally with a FastAPI backend, a responsive browser interface and SQLite storage.
 
-Cloud deployment: **https://jobdesk-eluyfppkua-el.a.run.app**. Sign in using Bharti's configured Google account. The cloud version uses persistent Firestore storage, encrypted tokens, Secret Manager and a daily Cloud Run worker. See [DEPLOYMENT.md](DEPLOYMENT.md) for configuration and redeployment commands.
+Cloud deployment: **https://jobdesk-eluyfppkua-el.a.run.app**. Open the workspace with its password on any device. Gmail authorization is saved in the cloud and is only needed when connecting or renewing mailbox access. The cloud version uses persistent Firestore storage, encrypted tokens, Secret Manager and a daily Cloud Run worker. See [DEPLOYMENT.md](DEPLOYMENT.md) for configuration and redeployment commands.
 
 ## Run locally on Windows
 

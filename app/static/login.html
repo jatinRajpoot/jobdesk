@@ -1,1 +1,21 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sign in · Jobdesk</title><link rel="stylesheet" href="/static/style.css"><link rel="stylesheet" href="/static/login.css"></head><body><main class="login"><div class="eyebrow">BHARTI'S PERSONAL WORKSPACE</div><h1>Your next chapter<br>starts here.</h1><p>Sign in with Bharti's Google account to access her job search, application materials and email tracker.</p><a class="button primary" href="/auth/google/start">Continue with Google →</a><p class="profile-note">Sign in once on each browser with Bharti's account. Her Gmail connection and job tracker are shared across devices. Gmail permission is requested on the first connection or when access needs renewal.</p><a class="light-link" href="/privacy">Privacy & data use</a></main></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+ <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+ <title>Open Jobdesk</title>
+ <link rel="stylesheet" href="/static/style.css"><link rel="stylesheet" href="/static/login.css">
+ <script src="/static/login.js" defer></script>
+</head>
+<body><main class="login">
+ <div class="eyebrow">BHARTI'S PERSONAL WORKSPACE</div>
+ <h1>Your next chapter<br>starts here.</h1>
+ <p>Enter your workspace password to open your jobs, applications and email tracker.</p>
+ <form id="login-form" method="post" action="/api/login">
+  <label for="password">Workspace password</label>
+  <input id="password" name="password" type="password" autocomplete="current-password" required maxlength="256" autofocus>
+  <p id="login-error" class="notice" role="alert" hidden></p>
+  <button class="button primary" type="submit">Open Jobdesk &#8594;</button>
+ </form>
+ <p class="profile-note">Your Gmail connection is saved in the cloud and shared across devices. Google sign-in is only needed when connecting or renewing Gmail access. This browser stays signed in for 30 days unless you sign out or clear its cookies.</p>
+ <a class="light-link" href="/privacy">Privacy &amp; data use</a>
+</main></body></html>

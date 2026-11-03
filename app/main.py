@@ -11,7 +11,7 @@ from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from . import access, automation, config, db, gmail, maildb, providers, workflows
@@ -62,10 +62,12 @@ search_lock = asyncio.Lock()
 
 @app.middleware("http")
 async def local_security(request: Request, call_next):
-    public = request.url.path in {"/login", "/privacy", "/api/health", "/auth/google/start", "/auth/google/callback"} or request.url.path.startswith("/static/")
+    public = request.url.path in {"/login", "/privacy", "/api/health", "/api/login", "/auth/google/start", "/auth/google/callback"} or request.url.path.startswith("/static/")
+    if request.url.path == "/auth/google/start" and access.password_hash():
+        public = False
     if access.required() and not public and not access.authenticated(request.cookies.get(access.COOKIE, "")):
         if request.url.path.startswith("/api/"):
-            return JSONResponse({"detail": "Sign in with Bharti's Google account to continue."}, status_code=401, headers={"Cache-Control": "no-store"})
+            return JSONResponse({"detail": "Enter the workspace password to continue."}, status_code=401, headers={"Cache-Control": "no-store"})
         return RedirectResponse("/login", status_code=303, headers={"Cache-Control": "no-store"})
     if request.method not in {"GET", "HEAD", "OPTIONS"}:
         origin = request.headers.get("origin")
@@ -131,9 +133,27 @@ async def health():
 async def login(request: Request):
     if request.query_params.get("gmail") == "failed":
         from fastapi.responses import HTMLResponse
-        html = (STATIC / "login.html").read_text(encoding="utf-8").replace('<a class="button primary"', '<p class="notice">The connection could not be completed. Use Bharti\'s configured Google account and grant both Gmail permissions, then try again.</p><a class="button primary"')
-        return HTMLResponse(html)
-    return FileResponse(STATIC / "login.html")
+        html = (STATIC / "login.html").read_text(encoding="utf-8").replace('<form id="login-form"', '<p class="notice">The Gmail connection could not be completed. Open the workspace with your password, then try again in Connections.</p><form id="login-form"')
+        return HTMLResponse(html, headers={"Cache-Control": "no-store"})
+    return FileResponse(STATIC / "login.html", headers={"Cache-Control": "no-store"})
+
+
+class PasswordLogin(BaseModel):
+    password: SecretStr = Field(min_length=1, max_length=256)
+
+
+@app.post("/api/login")
+def password_login(body: PasswordLogin):
+    encoded = access.password_hash()
+    if not encoded:
+        raise HTTPException(503, "Password login is not configured yet.")
+    if not access.claim_login_attempt():
+        raise HTTPException(429, "Too many login attempts. Try again in one minute.", headers={"Retry-After": "60"})
+    if not access.verify_password(body.password.get_secret_value(), encoded):
+        raise HTTPException(401, "Incorrect workspace password.")
+    response = JSONResponse({"ok": True})
+    response.set_cookie(access.COOKIE, access.issue(maildb.settings()["expected_email"]), max_age=access.SESSION_DAYS*86400, httponly=True, secure=True, samesite="lax", path="/")
+    return response
 
 
 @app.get("/privacy")
@@ -381,8 +401,8 @@ async def google_callback(request: Request, state: str = "", code: str = "", err
             raise gmail.GmailError("Google authorization was cancelled. Start again from Connections.")
         email = await gmail.finish_oauth(code, verifier)
         response = RedirectResponse("/#connections?gmail=connected", status_code=303)
-        if access.required():
-            response.set_cookie(access.COOKIE, access.issue(email), max_age=7*86400, httponly=True, secure=True, samesite="lax", path="/")
+        if access.required() and not access.password_hash():
+            response.set_cookie(access.COOKIE, access.issue(email), max_age=access.SESSION_DAYS*86400, httponly=True, secure=True, samesite="lax", path="/")
     except gmail.GmailError as exc:
         maildb.save_settings({"oauth_error": str(exc)})
         response = RedirectResponse("/login?gmail=failed" if access.required() else "/#connections?gmail=failed", status_code=303)

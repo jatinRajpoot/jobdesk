@@ -319,6 +319,17 @@ def mail_save_session(digest, email, expires):
     ref("sessions", digest).set({"email": email, "expires": expires})
 
 
+def mail_claim_login_attempt(now, limit=10, window_seconds=60):
+    def claim(tx):
+        row = get("login_limits", "password", tx)
+        started, attempts = (row["started"], row["attempts"]) if row and now < row["started"] + window_seconds else (now, 0)
+        if attempts >= limit:
+            return False
+        tx.set(ref("login_limits", "password"), {"started": started, "attempts": attempts + 1})
+        return True
+    return atomic(claim)
+
+
 def mail_session(digest):
     row = get("sessions", digest)
     return row if row and row["expires"] > stamp() else None

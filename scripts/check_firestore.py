@@ -58,6 +58,12 @@ maildb.save_secret("qa",{"private":"synthetic-secret"})
 assert maildb.secret("qa")["private"] == "synthetic-secret"
 raw=cloudstore.get("secrets","qa")["encrypted"]
 assert b"synthetic-secret" not in raw
+from concurrent.futures import ThreadPoolExecutor
+with ThreadPoolExecutor(max_workers=4) as pool:
+    claimed=list(pool.map(lambda _:maildb.claim_login_attempt(1000,limit=3),range(8)))
+assert sum(claimed)==3
+assert not maildb.claim_login_attempt(1059,limit=3)
+assert maildb.claim_login_attempt(1060,limit=3)
 r=maildb.start_run();maildb.finish_run(r,"ok","QA passed")
 assert maildb.last_run()["outcome"] == "ok"
 print(json.dumps({"firestore_checks":"passed","isolated_prefix":os.environ["JOBDESK_COLLECTION_PREFIX"],"email_sent":False}),flush=True)

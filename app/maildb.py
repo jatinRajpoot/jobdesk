@@ -30,6 +30,7 @@ def init():
         CREATE TABLE IF NOT EXISTS oauth_secrets (name TEXT PRIMARY KEY, encrypted BLOB NOT NULL);
         CREATE TABLE IF NOT EXISTS mail_checks (job_id TEXT PRIMARY KEY REFERENCES jobs(id), checked TEXT NOT NULL, status TEXT NOT NULL, message TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS web_sessions (hash TEXT PRIMARY KEY, email TEXT NOT NULL, expires TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS login_limits (name TEXT PRIMARY KEY, started REAL NOT NULL, attempts INTEGER NOT NULL);
         """)
         conn.execute("INSERT OR IGNORE INTO mail_settings VALUES(1,?)", (json.dumps(DEFAULT_SETTINGS),))
 
@@ -39,6 +40,18 @@ def settings():
     with db.connection() as conn:
         row = conn.execute("SELECT body FROM mail_settings WHERE id=1").fetchone()
     return {**DEFAULT_SETTINGS, **json.loads(row[0])}
+
+
+@cloud("mail")
+def claim_login_attempt(now, limit=10, window_seconds=60):
+    with db.connection() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute("SELECT started,attempts FROM login_limits WHERE name='password'").fetchone()
+        started, attempts = (row["started"], row["attempts"]) if row and now < row["started"] + window_seconds else (now, 0)
+        if attempts >= limit:
+            return False
+        conn.execute("INSERT INTO login_limits VALUES('password',?,?) ON CONFLICT(name) DO UPDATE SET started=excluded.started,attempts=excluded.attempts", (started, attempts + 1))
+    return True
 
 
 @cloud("mail")
