@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Your personal workspace for thoughtful job applications.">
+  <title>Jobdesk — Your next chapter</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar">
+    <a class="brand" href="#overview"><span class="brand-mark">j<span>↗</span></span>jobdesk<span class="brand-dot">.</span></a>
+    <div class="workspace-label">PERSONAL WORKSPACE</div>
+    <nav aria-label="Main navigation">
+      <a href="#overview" data-nav="overview"><span data-icon="grid"></span>Overview</a>
+      <a href="#discover" data-nav="discover"><span data-icon="search"></span>Discover jobs<span class="nav-count" id="job-count">0</span></a>
+      <a href="#pipeline" data-nav="pipeline"><span data-icon="columns"></span>Application tracker</a>
+      <a href="#mail" data-nav="mail"><span data-icon="mail"></span>Email applications</a>
+      <a href="#drafts" data-nav="drafts"><span data-icon="file"></span>Resume & outreach</a>
+      <a href="#profile" data-nav="profile"><span data-icon="user"></span>My profile</a>
+    </nav>
+    <div class="sidebar-bottom">
+      <div class="quiet-card"><span class="sparkle">✦</span><strong>A more thoughtful search.</strong><p>Find the right opportunities.<br>Make every application count.</p></div>
+      <a class="connection-link" href="#connections"><span data-icon="sliders"></span>Connections<span id="connection-dot" class="status-dot"></span></a>
+      <div class="sidebar-person"><span class="avatar" id="avatar">Y</span><div><strong id="sidebar-name">Your workspace</strong><small>Personal · Local</small></div><span class="local-dot"></span></div>
+    </div>
+  </aside>
+  <div class="main-shell">
+    <header class="topbar"><button class="icon-button mobile-menu" aria-label="Toggle navigation" id="mobile-menu"><span data-icon="menu"></span></button><div class="breadcrumb">Workspace <span>/</span> <strong id="breadcrumb-current">Overview</strong></div><div class="topbar-right"><span class="local-pill"><i></i>LOCAL PREVIEW</span><a class="icon-button" href="#connections" aria-label="Connection settings"><span data-icon="sliders"></span></a></div></header>
+    <main id="main" tabindex="-1"><div class="loading-screen"><span class="spinner"></span>Opening your workspace…</div></main>
+    <footer>Your next chapter starts with the right opportunity.<span>Built for a focused job search <span class="tiny-sparkle">✦</span></span></footer>
+  </div>
+</div>
+<dialog id="modal" aria-labelledby="modal-title"></dialog>
+<div id="toasts" role="status" aria-live="polite"></div>
+</body>
+</html>
