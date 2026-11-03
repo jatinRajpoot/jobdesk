@@ -67,3 +67,26 @@ def test_cloud_token_encryption_works_without_windows_dpapi(client, monkeypatch)
     with db.connection() as conn:
         encrypted = conn.execute("SELECT encrypted FROM oauth_secrets WHERE name='qa'").fetchone()[0]
     assert b"private-token-test" not in encrypted
+
+
+def test_new_device_sign_in_reuses_saved_gmail_grant(client, monkeypatch):
+    from urllib.parse import parse_qs, urlsplit
+    monkeypatch.setattr(gmail, "client_config", lambda: {"client_id": "test.apps.googleusercontent.com", "client_secret": "test-secret"})
+    maildb.save_secret("gmail_tokens", {"email": "bhartisingh8397@gmail.com", "refresh_token": "saved-phone-grant"})
+
+    # The laptop has no session, even though the phone connected the mailbox.
+    assert client.get("/api/state").status_code == 401
+    response = client.get("/auth/google/start", follow_redirects=False)
+    query = parse_qs(urlsplit(response.headers["location"]).query)
+    assert "consent" not in query.get("prompt", [""])[0].split()
+
+    async def tokens(data):
+        return {"access_token": "new-device-access", "scope": " ".join(gmail.SCOPES)}
+    async def profile(*args, **kwargs):
+        return {"emailAddress": "bhartisingh8397@gmail.com"}
+    monkeypatch.setattr(gmail, "token_request", tokens)
+    monkeypatch.setattr(gmail, "api", profile)
+    response = client.get("/auth/google/callback", params={"state": query["state"][0], "code": "new-device-code"}, follow_redirects=False)
+    assert response.status_code == 303
+    assert client.get("/api/state").status_code == 200
+    assert maildb.secret("gmail_tokens")["refresh_token"] == "saved-phone-grant"

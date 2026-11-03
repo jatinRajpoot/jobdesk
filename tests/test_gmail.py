@@ -57,6 +57,22 @@ def test_oauth_start_requests_only_needed_scopes_with_pkce_and_cookie(client):
     assert "client-secret-test" not in r.headers["location"]
 
 
+@pytest.mark.parametrize("saved", [None, {"email": "bhartisingh8397@gmail.com"}, {"email": "wrong@example.org", "refresh_token": "wrong"}, {"email": "bhartisingh8397@gmail.com", "refresh_token": "expired", "reconnect_required": True}])
+def test_initial_or_invalid_grant_requests_offline_consent(client, saved):
+    connect()
+    maildb.save_secret("gmail_tokens", saved)
+    response = client.get("/auth/google/start", headers={"host": "127.0.0.1:8000"}, follow_redirects=False)
+    assert parse_qs(urlsplit(response.headers["location"]).query)["prompt"] == ["consent"]
+
+
+def test_explicit_renewal_requests_consent_and_survives_canonical_redirect(client):
+    connect()
+    response = client.get("/auth/google/start?reconnect=true", follow_redirects=False)
+    assert response.headers["location"] == gmail.REDIRECT.replace("/callback", "/start") + "?reconnect=true"
+    response = client.get(response.headers["location"], follow_redirects=False)
+    assert parse_qs(urlsplit(response.headers["location"]).query)["prompt"] == ["consent"]
+
+
 def test_oauth_state_is_bound_to_browser_expires_and_cannot_be_replayed(client):
     connect()
     url, cookie = gmail.begin_oauth()

@@ -360,12 +360,13 @@ async def import_google_client(file: UploadFile = File(...)):
 
 
 @app.get("/auth/google/start")
-async def google_start(request: Request):
+async def google_start(request: Request, reconnect: bool = False):
     # Keep the cookie and callback on the same host, including localhost/127.0.0.1 aliases.
     canonical = urlsplit(gmail.REDIRECT)
     if request.headers.get("host") != canonical.netloc:
-        return RedirectResponse(f"{canonical.scheme}://{canonical.netloc}/auth/google/start", status_code=303)
-    url, browser = gmail.begin_oauth()
+        suffix = "?reconnect=true" if reconnect else ""
+        return RedirectResponse(f"{canonical.scheme}://{canonical.netloc}/auth/google/start{suffix}", status_code=303)
+    url, browser = gmail.begin_oauth(reconnect=reconnect)
     response = RedirectResponse(url, status_code=303)
     response.set_cookie("jobdesk_oauth", browser, max_age=600, httponly=True, secure=canonical.scheme == "https", samesite="lax", path="/auth/google")
     return response

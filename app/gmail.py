@@ -50,7 +50,7 @@ def status():
     return {"configured": bool(client), "connected": bool(tokens and tokens.get("refresh_token")), "email": tokens.get("email") if tokens else None, "expected_email": maildb.settings()["expected_email"], "redirect_uri": REDIRECT, "scopes": list(SCOPES), "mode": "Automatic email applications + reply tracking", "reconnect_required": bool(tokens and tokens.get("reconnect_required")), "last_error": maildb.settings().get("oauth_error", "")}
 
 
-def begin_oauth():
+def begin_oauth(reconnect=False):
     client = client_config()
     if not client:
         raise GmailError("Import the Google OAuth client JSON in Connections first.")
@@ -59,7 +59,14 @@ def begin_oauth():
     browser_hash = hashlib.sha256(browser.encode()).hexdigest()
     maildb.save_oauth_state(digest, verifier, browser_hash)
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
-    query = {"client_id": client["client_id"], "redirect_uri": REDIRECT, "response_type": "code", "scope": " ".join(SCOPES), "state": state, "access_type": "offline", "prompt": "consent", "include_granted_scopes": "true", "login_hint": maildb.settings()["expected_email"], "code_challenge": challenge, "code_challenge_method": "S256"}
+    expected = maildb.settings()["expected_email"]
+    tokens = maildb.secret("gmail_tokens") or {}
+    saved_grant = bool(tokens.get("refresh_token") and tokens.get("email", "").lower() == expected.lower() and not tokens.get("reconnect_required"))
+    query = {"client_id": client["client_id"], "redirect_uri": REDIRECT, "response_type": "code", "scope": " ".join(SCOPES), "state": state, "access_type": "offline", "include_granted_scopes": "true", "login_hint": expected, "code_challenge": challenge, "code_challenge_method": "S256"}
+    # A new browser needs its own verified session, but can reuse the cloud's Gmail grant.
+    # Force consent only when offline access must be established or explicitly renewed.
+    if reconnect or not saved_grant:
+        query["prompt"] = "consent"
     return "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(query), browser
 
 
